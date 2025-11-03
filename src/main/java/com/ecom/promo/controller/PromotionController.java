@@ -36,7 +36,7 @@ import java.util.UUID;
  * applied first. Multiple promotions can stack if configured.
  */
 @RestController
-@RequestMapping("/v1/promotion")
+@RequestMapping("/api/v1/promotion")
 @Tag(name = "Promotions", description = "Pricing, discounts, coupons, and surge pricing management")
 @SecurityRequirement(name = "bearerAuth")
 public class PromotionController {
