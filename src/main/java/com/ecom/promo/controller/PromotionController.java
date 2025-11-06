@@ -1,13 +1,28 @@
 package com.ecom.promo.controller;
 
+import com.ecom.promo.model.request.CouponRequest;
+import com.ecom.promo.model.request.CouponValidationRequest;
+import com.ecom.promo.model.request.PriceCalculationRequest;
+import com.ecom.promo.model.request.PromotionRequest;
+import com.ecom.promo.model.response.CouponResponse;
+import com.ecom.promo.model.response.PriceCalculationResponse;
+import com.ecom.promo.model.response.PromotionResponse;
+import com.ecom.promo.security.JwtAuthenticationToken;
+import com.ecom.promo.service.PromotionService;
+import com.ecom.response.dto.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -39,7 +54,11 @@ import java.util.UUID;
 @RequestMapping("/api/v1/promotion")
 @Tag(name = "Promotions", description = "Pricing, discounts, coupons, and surge pricing management")
 @SecurityRequirement(name = "bearerAuth")
+@RequiredArgsConstructor
+@Slf4j
 public class PromotionController {
+    
+    private final PromotionService promotionService;
 
     /**
      * Calculate final price for a product
@@ -56,24 +75,24 @@ public class PromotionController {
      *   <li>Returns final price with breakdown (base, discount, final)</li>
      * </ul>
      * 
-     * <p>This endpoint may be public (for price display) or require authentication.
+     * <p>This endpoint is public (for price display).
      */
     @PostMapping("/calculate")
     @Operation(
         summary = "Calculate final price with promotions",
         description = "Applies active promotions and coupons to a product's base price and returns final price"
     )
-    public ResponseEntity<Object> calculatePrice(@Valid @RequestBody Object priceRequest) {
-        // TODO: Implement price calculation logic
-        // 1. Extract tenantId from X-Tenant-Id header (if available)
-        // 2. Validate priceRequest DTO (productId/SKU, quantity, couponCode if provided)
-        // 3. Fetch base price from Catalog service (service-to-service call or cache)
-        // 4. Query active promotions for product/category/tenant
-        // 5. Apply promotions in priority order (percentage, fixed amount, surge pricing)
-        // 6. Apply coupon discount if couponCode provided and valid
-        // 7. Calculate final price (ensure non-negative)
-        // 8. Return price breakdown (basePrice, discountAmount, finalPrice, appliedPromotions)
-        return ResponseEntity.ok(null);
+    public ResponseEntity<ApiResponse<PriceCalculationResponse>> calculatePrice(
+            @Valid @RequestBody PriceCalculationRequest priceRequest,
+            Authentication authentication) {
+        
+        log.info("Calculating price: productId={}, quantity={}", 
+            priceRequest.productId(), priceRequest.quantity());
+        
+        UUID tenantId = getTenantIdFromAuthentication(authentication);
+        
+        PriceCalculationResponse response = promotionService.calculatePrice(tenantId, priceRequest);
+        return ResponseEntity.ok(ApiResponse.success(response, "Price calculated successfully"));
     }
 
     /**
@@ -100,16 +119,20 @@ public class PromotionController {
         description = "Creates a promotional rule (discount, percentage-off, etc.) with validity period and eligibility criteria"
     )
     @SecurityRequirement(name = "bearerAuth")
-    public ResponseEntity<Object> createPromotion(@Valid @RequestBody Object promotionRequest) {
-        // TODO: Implement promotion creation logic
-        // 1. Extract userId from X-User-Id header
-        // 2. Extract tenantId from X-Tenant-Id header
-        // 3. Verify user has SELLER or ADMIN role
-        // 4. Validate promotionRequest DTO (type, discount, startDate, endDate, eligibility)
-        // 5. Create Promotion entity
-        // 6. Persist to database
-        // 7. Return promotion response with promotionId (201 Created)
-        return ResponseEntity.status(HttpStatus.CREATED).body(null);
+    @PreAuthorize("hasRole('SELLER') or hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<PromotionResponse>> createPromotion(
+            @Valid @RequestBody PromotionRequest promotionRequest,
+            Authentication authentication) {
+        
+        log.info("Creating promotion: name={}", promotionRequest.name());
+        
+        UUID userId = getUserIdFromAuthentication(authentication);
+        UUID tenantId = getTenantIdFromAuthentication(authentication);
+        List<String> roles = getRolesFromAuthentication(authentication);
+        
+        PromotionResponse response = promotionService.createPromotion(userId, tenantId, roles, promotionRequest);
+        return ResponseEntity.status(HttpStatus.CREATED)
+            .body(ApiResponse.success(response, "Promotion created successfully"));
     }
 
     /**
@@ -127,23 +150,23 @@ public class PromotionController {
      *   <li>Minimum order value met (if required)</li>
      * </ul>
      * 
-     * <p>This endpoint may be public (for coupon validation during checkout) or protected.
+     * <p>This endpoint is public (for coupon validation during checkout).
      */
     @PostMapping("/coupon/validate")
     @Operation(
         summary = "Validate coupon code",
         description = "Validates a coupon code and returns discount information if valid and applicable"
     )
-    public ResponseEntity<Object> validateCoupon(@Valid @RequestBody Object couponRequest) {
-        // TODO: Implement coupon validation logic
-        // 1. Validate couponRequest DTO (couponCode, orderTotal, itemIds if applicable)
-        // 2. Find Coupon entity by code
-        // 3. Check if coupon is active and not expired
-        // 4. Check usage limits (global and per-user)
-        // 5. Verify eligibility (product/category match, minimum order value)
-        // 6. Return coupon details with discount amount/percentage
-        // 7. Handle BusinessException for INVALID_COUPON, COUPON_EXPIRED, USAGE_LIMIT_EXCEEDED
-        return ResponseEntity.ok(null);
+    public ResponseEntity<ApiResponse<CouponResponse>> validateCoupon(
+            @Valid @RequestBody CouponValidationRequest couponRequest,
+            Authentication authentication) {
+        
+        log.info("Validating coupon: code={}", couponRequest.couponCode());
+        
+        UUID tenantId = getTenantIdFromAuthentication(authentication);
+        
+        CouponResponse response = promotionService.validateCoupon(tenantId, couponRequest);
+        return ResponseEntity.ok(ApiResponse.success(response, "Coupon validated successfully"));
     }
 
     /**
@@ -162,17 +185,20 @@ public class PromotionController {
         description = "Creates a new coupon code with discount rules, validity period, and usage limits"
     )
     @SecurityRequirement(name = "bearerAuth")
-    public ResponseEntity<Object> createCoupon(@Valid @RequestBody Object couponRequest) {
-        // TODO: Implement coupon creation logic
-        // 1. Extract userId from X-User-Id header
-        // 2. Extract tenantId from X-Tenant-Id header
-        // 3. Verify user has SELLER or ADMIN role
-        // 4. Validate couponRequest DTO (code or auto-generate, discount, expiry, usageLimit)
-        // 5. Check code uniqueness if manually specified
-        // 6. Create Coupon entity
-        // 7. Persist to database
-        // 8. Return coupon response with code (201 Created)
-        return ResponseEntity.status(HttpStatus.CREATED).body(null);
+    @PreAuthorize("hasRole('SELLER') or hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<CouponResponse>> createCoupon(
+            @Valid @RequestBody CouponRequest couponRequest,
+            Authentication authentication) {
+        
+        log.info("Creating coupon: code={}", couponRequest.code());
+        
+        UUID userId = getUserIdFromAuthentication(authentication);
+        UUID tenantId = getTenantIdFromAuthentication(authentication);
+        List<String> roles = getRolesFromAuthentication(authentication);
+        
+        CouponResponse response = promotionService.createCoupon(userId, tenantId, roles, couponRequest);
+        return ResponseEntity.status(HttpStatus.CREATED)
+            .body(ApiResponse.success(response, "Coupon created successfully"));
     }
 
     /**
@@ -181,21 +207,55 @@ public class PromotionController {
      * <p>Returns all active promotions currently applicable to a product. Used by
      * frontend to display promotional badges and discount information.
      * 
-     * <p>This endpoint may be public (for product display) or require authentication.
+     * <p>This endpoint is public (for product display).
      */
     @GetMapping("/product/{productId}/active")
     @Operation(
         summary = "Get active promotions for a product",
         description = "Returns all currently active promotions applicable to the specified product"
     )
-    public ResponseEntity<Object> getActivePromotions(@PathVariable UUID productId) {
-        // TODO: Implement active promotions retrieval logic
-        // 1. Extract tenantId from X-Tenant-Id header (if available)
-        // 2. Query Promotion repository for active promotions
-        // 3. Filter by productId, categoryId, or tenant-wide promotions
-        // 4. Check validity period (current date between startDate and endDate)
-        // 5. Return list of active promotions
-        return ResponseEntity.ok(null);
+    public ResponseEntity<ApiResponse<List<PromotionResponse>>> getActivePromotions(
+            @PathVariable UUID productId,
+            Authentication authentication) {
+        
+        log.info("Getting active promotions for product: {}", productId);
+        
+        UUID tenantId = getTenantIdFromAuthentication(authentication);
+        
+        List<PromotionResponse> response = promotionService.getActivePromotions(productId, tenantId);
+        return ResponseEntity.ok(ApiResponse.success(response, "Active promotions retrieved successfully"));
+    }
+    
+    /**
+     * Extract user ID from JWT authentication token
+     */
+    private UUID getUserIdFromAuthentication(Authentication authentication) {
+        if (authentication instanceof JwtAuthenticationToken jwtToken) {
+            return UUID.fromString(jwtToken.getUserId());
+        }
+        return null; // Public endpoint
+    }
+    
+    /**
+     * Extract tenant ID from JWT authentication token
+     */
+    private UUID getTenantIdFromAuthentication(Authentication authentication) {
+        if (authentication instanceof JwtAuthenticationToken jwtToken) {
+            return UUID.fromString(jwtToken.getTenantId());
+        }
+        // For public endpoints, tenantId might come from header or be null
+        // In production, you'd extract from X-Tenant-Id header
+        return null;
+    }
+    
+    /**
+     * Extract roles from JWT authentication token
+     */
+    private List<String> getRolesFromAuthentication(Authentication authentication) {
+        if (authentication instanceof JwtAuthenticationToken jwtToken) {
+            return jwtToken.getRoles();
+        }
+        return List.of();
     }
 }
 
